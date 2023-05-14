@@ -11,77 +11,104 @@
 int N = 4;
 float SLEEP = 2.0;
 
-int main() {
+int main()
+{
 	srand(time(NULL));
 
-	int fd_buff, fd_empty, fd_full, fd_info, value=1;
-	char *buffer, *empty, *full;
-	sem_t *Sp, *Sc, *Se, *Sf;
-	int *info;
+	int fd_buff;   // file descriptor for buffer
+	int fd_empty;  // file descriptor for empty
+	int fd_full;   // file descriptor for full
+	int fd_info;   // file descriptor for info
+	int value = 1; // value for semaphores
 
-	fd_buff = shm_open("/buffer", O_CREAT|O_RDWR, 0600);
-	ftruncate(fd_buff, N*sizeof(int));
-	buffer = mmap(NULL, N*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_buff, 0);
+	char *buffer; // pointer to buffer memory segment
+	char *empty;  // pointer to empty memory segment
+	char *full;	  // pointer to full memory segment
 
-	fd_empty = shm_open("/empty", O_CREAT|O_RDWR, 0600);
-	ftruncate(fd_empty, N*sizeof(int));
-	empty = mmap(NULL, N*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_empty, 0);
+	sem_t *semaphore_producer; // pointer to producer semaphore
+	sem_t *semaphore_consumer; // pointer to consumer semaphore
+	sem_t *semaphore_empty;	   // pointer to empty semaphore
+	sem_t *semaphore_full;	   // pointer to full semaphore
 
-	fd_full = shm_open("/full", O_CREAT|O_RDWR, 0600);
-	ftruncate(fd_full, N*sizeof(int));
-	full = mmap(NULL, N*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_full, 0);
+	int *info; // pointer to info
 
-	//info[0] = num_of_started_proc, indexes[1] = empty_add, indexes[2] = empty_rmv, indexes[3] = full_add, indexes[4] = full_rmv
-	fd_info = shm_open("/info", O_CREAT|O_RDWR, 0600);
-	ftruncate(fd_info, 5*sizeof(int));
-	info = mmap(NULL, 5*sizeof(int), PROT_READ|PROT_WRITE, MAP_SHARED, fd_info, 0);
+	// open shared memory
+	fd_buff = shm_open("/buffer", O_CREAT | O_RDWR, 0600);
+	ftruncate(fd_buff, N * sizeof(int));
+	buffer = mmap(NULL, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_buff, 0);
 
-	if (buffer == MAP_FAILED || empty == MAP_FAILED || full == MAP_FAILED || info == MAP_FAILED){
+	// open empty and full memory segments
+	fd_empty = shm_open("/empty", O_CREAT | O_RDWR, 0600);
+	ftruncate(fd_empty, N * sizeof(int));
+	empty = mmap(NULL, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_empty, 0);
+
+	fd_full = shm_open("/full", O_CREAT | O_RDWR, 0600);
+	ftruncate(fd_full, N * sizeof(int));
+	full = mmap(NULL, N * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_full, 0);
+
+	// open info memory segment
+	fd_info = shm_open("/info", O_CREAT | O_RDWR, 0600);
+	ftruncate(fd_info, 5 * sizeof(int));
+	info = mmap(NULL, 5 * sizeof(int), PROT_READ | PROT_WRITE, MAP_SHARED, fd_info, 0);
+
+	// check if memory segments are opened correctly
+	if (buffer == MAP_FAILED || empty == MAP_FAILED || full == MAP_FAILED || info == MAP_FAILED)
+	{
 		perror("mmap");
 		exit(1);
 	}
 
-	if(info[0] == 0){
+	// initialize info to match the current state of the memory segments
+	if (info[0] == 0)
+	{
 		info[0]++;
-        for(int i = 0; i < N; i++){
-            empty[i] = i;
-            full[i] = -1;
-        }
-		for(int i = 1; i < 5; i++){
+		for (int i = 0; i < N; i++)
+		{
+			empty[i] = i;
+			full[i] = -1;
+		}
+		for (int i = 1; i < 5; i++)
+		{
 			info[i] = 0;
 		}
 	}
 
-	Sp = sem_open("/Sp", O_CREAT, 0600, N);
-	Sc = sem_open("/Sr", O_CREAT, 0600, 0);
-	Se = sem_open("/Se", O_CREAT, 0600, 1);
-	Sf = sem_open("/Sf", O_CREAT, 0600, 1);
+	// open semaphores
+	semaphore_producer = sem_open("/Sp", O_CREAT, 0600, N);
+	semaphore_consumer = sem_open("/Sr", O_CREAT, 0600, 0);
+	semaphore_empty = sem_open("/Se", O_CREAT, 0600, 1);
+	semaphore_full = sem_open("/Sf", O_CREAT, 0600, 1);
 
-	if (Sp == SEM_FAILED || Sc == SEM_FAILED || Se == SEM_FAILED || Sf == SEM_FAILED){
+	// check if semaphores are opened correctly
+	if (semaphore_producer == SEM_FAILED || semaphore_consumer == SEM_FAILED || semaphore_empty == SEM_FAILED || semaphore_full == SEM_FAILED)
+	{
 		perror("sem_open");
 		exit(1);
 	}
 
 	int prod_index;
-	while(1){
-		float speed = ((float)rand()/(float)(RAND_MAX)+0.5) * SLEEP;
-		sem_wait(Sp);
+	// producer loop
+	while (1)
+	{
+		float speed = ((float)rand() / (float)(RAND_MAX) + 0.5) * SLEEP; // generate random speed for producer
 
-		sem_wait(Se);
-		prod_index = empty[info[2]];
-		info[2] = (info[2] + 1) % N;
-		sem_post(Se);
+		sem_wait(semaphore_producer); // wait for producer semaphore
 
-		printf("Production: buffer[%d] = %d\n", prod_index, value);
-		buffer[prod_index] = value++;
-		sleep(speed);
-		
-		sem_wait(Sf);
-		full[info[3]] = prod_index;
-		info[3] = (info[3] + 1) % N;
-		sem_post(Sf);
+		sem_wait(semaphore_empty);	 // wait for empty semaphore
+		prod_index = empty[info[2]]; // get index from empty memory segment
+		info[2] = (info[2] + 1) % N; // update empty index
+		sem_post(semaphore_empty);	 // post empty semaphore
 
-		sem_post(Sc);
+		printf("Production: buffer[%d] = %d\n", prod_index, value); // print production
+		buffer[prod_index] = value++;								// update buffer
+		sleep(speed);												// sleep for random speed
+
+		sem_wait(semaphore_full);	 // wait for full semaphore
+		full[info[3]] = prod_index;	 // update full memory segment
+		info[3] = (info[3] + 1) % N; // update full index
+		sem_post(semaphore_full);	 // post full semaphore
+
+		sem_post(semaphore_consumer); // post consumer semaphore
 	}
 
 	return 0;
